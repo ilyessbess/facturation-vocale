@@ -2,12 +2,24 @@
   "name": "facturation-vocale",
   "version": "0.1.0",
   "private": true,
+  "//browserslist": "Cible élargie pour supporter les vieux iPhone/Safari (< 16.4). Sans ça, Next 16 génère du JS ES2022 (blocs static {}) que Safari ancien ne lit pas, et l'app reste bloquée sur Chargement.",
+  "browserslist": [
+    "chrome >= 90",
+    "edge >= 90",
+    "firefox >= 90",
+    "safari >= 13",
+    "ios_saf >= 13"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
+    "exceljs": "^4.4.0",
+    "groq-sdk": "^1.2.1",
+    "jspdf": "^4.2.1",
     "next": "16.2.7",
     "react": "19.2.4",
     "react-dom": "19.2.4"

@@ -1,26 +1,54 @@
 @import "tailwindcss";
 
+/*
+ * Thème pensé pour une personne âgée, fatiguée, dans une voiture :
+ * fond clair, texte foncé, contrastes forts, gros texte par défaut.
+ * Pas de mode sombre automatique (on garde un rendu constant et lisible).
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f6f8;
+  --foreground: #0b1320;
+  --accent: #1d4ed8; /* bleu fort, comme le total TTC du modèle */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-accent: var(--accent);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  /* Base un peu plus grande que la normale pour la lisibilité. */
+  font-size: 18px;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  /* Empêche le zoom involontaire et les rebonds sur iOS. */
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+}
+
+/* Champs de saisie : grands, lisibles, faciles à toucher.
+   font-size >= 16px évite le zoom automatique de Safari iOS au focus. */
+input,
+textarea,
+select,
+button {
+  font-size: 1rem;
+}
+
+input,
+textarea,
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Zone de sécurité iPhone (encoche / barre du bas). */
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
