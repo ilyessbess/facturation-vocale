@@ -64,6 +64,19 @@ export default function ReglagesPage() {
         </Link>
       </header>
 
+      <Bloc titre="Compte">
+        <Champ label="Votre prénom (affiché dans l'accueil)">
+          <input
+            className={inputCls}
+            placeholder="ex : François"
+            value={reglages.prenomUtilisateur ?? ""}
+            onChange={(ev) =>
+              setReglages({ ...reglages, prenomUtilisateur: ev.target.value })
+            }
+          />
+        </Champ>
+      </Bloc>
+
       <Bloc titre="Entreprise">
         <Champ label="Nom de la société">
           <input

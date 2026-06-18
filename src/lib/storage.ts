@@ -18,6 +18,7 @@ export type Reglages = {
   emetteur: Emetteur;
   tauxTVADefaut: number; // ex: 10
   prochainNumeroFacture: string; // ex: "23/26"
+  prenomUtilisateur: string; // ex: "François" — affiché dans le "Bonjour"
 };
 
 /** Réglages par défaut pré-remplis avec les données FCCS (ça marche tout de suite). */
@@ -38,6 +39,7 @@ export const REGLAGES_PAR_DEFAUT: Reglages = {
   },
   tauxTVADefaut: 20, // 20 % = cas le plus courant (modifiable à la voix ou au clavier)
   prochainNumeroFacture: "23/26",
+  prenomUtilisateur: "",
 };
 
 const CLE_REGLAGES = "fccs.reglages";

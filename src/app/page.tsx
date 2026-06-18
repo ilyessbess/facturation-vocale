@@ -1,307 +1,192 @@
 "use client";
 
-/**
- * Écran principal — un seul écran, le micro au centre.
- *
- * Orchestration du pipeline :
- *   voix → /api/transcribe (Groq) → texte → /api/extract (Claude) → facture mise à jour.
- * La correction écrite passe directement par /api/extract. Le brouillon est
- * sauvegardé en local à chaque changement pour ne rien perdre.
- */
-
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import BoutonMicro from "@/components/BoutonMicro";
-import ApercuFacture from "@/components/ApercuFacture";
-import type { Facture } from "@/lib/types";
-import { factureVide } from "@/lib/demo";
 import {
-  clearFacture,
-  incrementerNumero,
-  loadFacture,
+  loadHistorique,
+  deleteHistoriqueEntry,
   loadReglages,
-  saveFacture,
-  saveReglages,
-  saveHistoriqueEntry,
+  type HistoriqueEntry,
 } from "@/lib/storage";
+import { calculerTotaux } from "@/lib/calculs";
 import { genererPDF } from "@/lib/pdf";
 import { partagerFichier, peutPartagerFichiers } from "@/lib/fichiers";
 
-type Message = { texte: string; type: "info" | "erreur" } | null;
-
-/** Petite pause (ms). */
-const attendre = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Envoie une requête au serveur en RÉESSAYANT automatiquement si le réseau
- * coupe. Indispensable pour un usage en voiture (connexion qui saute). On tente
- * jusqu'à 3 fois, avec une courte pause entre chaque essai.
- */
-async function envoyerAvecReprise(
-  url: string,
-  options: RequestInit,
-  onReprise: () => void
-): Promise<Response> {
-  const pauses = [800, 1600]; // attentes avant les 2 reprises
-  let derniereErreur: unknown;
-  for (let i = 0; i <= pauses.length; i++) {
-    try {
-      return await fetch(url, options);
-    } catch (e) {
-      derniereErreur = e;
-      if (i < pauses.length) {
-        onReprise();
-        await attendre(pauses[i]);
-      }
-    }
-  }
-  throw derniereErreur;
+function abregerSite(site: string): string {
+  if (!site?.trim()) return "";
+  const s = site.trim();
+  return s.length <= 22 ? s : s.slice(0, 21) + "…";
 }
 
-/** Lit le JSON d'une réponse sans planter si la réponse n'en est pas. */
-async function litJson(
-  r: Response
-): Promise<{ erreur?: string; texte?: string; facture?: Facture }> {
-  try {
-    return await r.json();
-  } catch {
-    return {};
-  }
-}
-
-export default function Page() {
-  const [facture, setFacture] = useState<Facture | null>(null);
-  const [occupe, setOccupe] = useState(false);
-  const [message, setMessage] = useState<Message>(null);
-  // Fichiers générés en attente de partage (un bouton par fichier).
-  const [fichiers, setFichiers] = useState<{ blob: Blob; nomFichier: string }[]>([]);
-  // L'appareil sait-il partager (iPhone) ou faut-il télécharger (ordinateur) ?
+export default function Dashboard() {
+  const [entries, setEntries] = useState<HistoriqueEntry[]>([]);
   const [peutPartager, setPeutPartager] = useState(false);
-  useEffect(() => setPeutPartager(peutPartagerFichiers()), []);
+  const [enCours, setEnCours] = useState<string | null>(null);
+  const [prenom, setPrenom] = useState("");
 
-  // Au démarrage : on reprend le brouillon en cours, sinon une facture VIERGE
-  // (en-tête, numéro, date, ville et déplacement pré-remplis ; le reste à dicter).
   useEffect(() => {
+    setEntries(loadHistorique());
+    setPeutPartager(peutPartagerFichiers());
     const reglages = loadReglages();
-    const brouillon = loadFacture();
-    setFacture(
-      brouillon ??
-        factureVide(
-          reglages.emetteur,
-          reglages.prochainNumeroFacture,
-          reglages.tauxTVADefaut
-        )
-    );
+    setPrenom(reglages.prenomUtilisateur ?? "");
   }, []);
 
-  // Sauvegarde locale à chaque changement (rien n'est perdu si l'app se ferme).
-  useEffect(() => {
-    if (facture) saveFacture(facture);
-  }, [facture]);
+  const today = new Date().toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
-  function info(texte: string) {
-    setMessage({ texte, type: "info" });
-  }
-  function erreur(texte: string) {
-    setMessage({ texte, type: "erreur" });
-  }
+  const initiale = prenom ? prenom[0].toUpperCase() : "F";
 
-  /** Nouvelle facture vierge (en-tête et numéro pré-remplis depuis les Réglages). */
-  function nouvelleFacture() {
-    const reglages = loadReglages();
-    const f = factureVide(
-      reglages.emetteur,
-      reglages.prochainNumeroFacture,
-      reglages.tauxTVADefaut
-    );
-    clearFacture();
-    setFacture(f);
-    setFichiers([]);
-    setMessage(null);
+  function supprimer(id: string) {
+    const ok = window.confirm("Supprimer cette facture de l'historique ?");
+    if (!ok) return;
+    deleteHistoriqueEntry(id);
+    setEntries((prev) => prev.filter((e) => e.id !== id));
   }
 
-  /** Envoie un texte (dicté puis transcrit, ou tapé) à l'extraction Claude. */
-  async function appliquerTexte(texte: string) {
-    if (!facture) return;
-    setOccupe(true);
-    info("Je réfléchis…");
+  async function regenerer(entry: HistoriqueEntry) {
+    setEnCours(entry.id);
     try {
-      const r = await envoyerAvecReprise(
-        "/api/extract",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ texte, factureActuelle: facture }),
-        },
-        () => info("La connexion est lente, je réessaie…")
-      );
-      const data = await litJson(r);
-      if (!r.ok) {
-        erreur(data.erreur ?? "Je n'ai pas tout compris. Reformule ou tape la correction.");
-        return;
-      }
-      if (data.facture) setFacture(data.facture);
-      setMessage(null);
+      const pdf = await genererPDF(entry.facture);
+      await partagerFichier(pdf.blob, pdf.nomFichier);
     } catch {
-      erreur("La connexion a échoué (réseau faible ?). Appuie à nouveau pour réessayer.");
+      alert("Erreur lors de la génération du PDF.");
     } finally {
-      setOccupe(false);
+      setEnCours(null);
     }
-  }
-
-  /** Reçoit l'audio du micro : transcription puis extraction. */
-  async function onAudio(blob: Blob) {
-    setOccupe(true);
-    info("Je transcris ce que tu as dit…");
-    try {
-      const form = new FormData();
-      const ext = blob.type.includes("webm") ? "webm" : "m4a";
-      form.append("audio", blob, `audio.${ext}`);
-
-      const r = await envoyerAvecReprise(
-        "/api/transcribe",
-        { method: "POST", body: form },
-        () => info("La connexion est lente, je réessaie…")
-      );
-      const data = await litJson(r);
-      if (!r.ok) {
-        erreur(data.erreur ?? "Je n'ai pas bien entendu, peux-tu répéter ?");
-        setOccupe(false);
-        return;
-      }
-      const texte = (data.texte ?? "").trim();
-      if (!texte) {
-        erreur("Je n'ai rien entendu. Rapproche le téléphone et réessaie.");
-        setOccupe(false);
-        return;
-      }
-      // On enchaîne directement sur l'extraction.
-      await appliquerTexte(texte);
-    } catch {
-      erreur("La connexion a échoué (réseau faible ?). Appuie à nouveau pour réessayer.");
-      setOccupe(false);
-    }
-  }
-
-  /** Génère le PDF et le propose (partage natif iPhone ou téléchargement direct). */
-  async function genererFichiers() {
-    if (!facture) return;
-    setOccupe(true);
-    setFichiers([]);
-    info("Je prépare le PDF…");
-    try {
-      const pdf = await genererPDF(facture);
-      setFichiers([pdf]);
-
-      // Sauvegarde dans l'historique puis incrémentation du numéro.
-      saveHistoriqueEntry(facture);
-      const reglages = loadReglages();
-      reglages.prochainNumeroFacture = incrementerNumero(facture.numeroFacture);
-      saveReglages(reglages);
-
-      info("Fichiers prêts. Utilise les boutons verts ci-dessous.");
-    } catch (e) {
-      console.error(e);
-      erreur("Je n'ai pas réussi à générer les fichiers. Réessaie.");
-    } finally {
-      setOccupe(false);
-    }
-  }
-
-  if (!facture) {
-    return <main className="p-6 text-xl">Chargement…</main>;
   }
 
   return (
-    <main className="flex flex-col gap-6 max-w-xl mx-auto w-full px-4 py-5 safe-bottom">
-      {/* En-tête de l'app */}
-      <header className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-extrabold">Facture FCCS</h1>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={nouvelleFacture}
-            className="px-3 py-2 rounded-lg bg-blue-700 text-white font-bold active:bg-blue-800"
-          >
-            Nouvelle facture
-          </button>
-          <Link
-            href="/historique"
-            className="px-3 py-2 rounded-lg border-2 border-slate-300 font-bold"
-            aria-label="Historique"
-          >
-            📋
-          </Link>
-          <Link
-            href="/reglages"
-            className="px-3 py-2 rounded-lg border-2 border-slate-300 font-bold"
-            aria-label="Réglages"
-          >
-            ⚙︎
-          </Link>
+    <main className="flex flex-col min-h-screen bg-slate-50">
+      {/* Header */}
+      <div className="bg-white px-5 pt-10 pb-5 border-b border-slate-100 shadow-sm">
+        <div className="flex items-center justify-between max-w-xl mx-auto">
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-900">
+              {prenom ? `Bonjour, ${prenom}` : "Bonjour"}
+            </h1>
+            <p className="text-slate-400 text-sm capitalize">{today}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-extrabold text-lg select-none">
+              {initiale}
+            </div>
+            <Link
+              href="/reglages"
+              className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-slate-200 text-slate-500 font-bold"
+              aria-label="Réglages"
+            >
+              ⚙︎
+            </Link>
+          </div>
         </div>
-      </header>
-
-      {/* Bouton micro central */}
-      <div className="py-2">
-        <BoutonMicro onAudio={onAudio} occupe={occupe} onErreur={erreur} />
       </div>
 
-      {/* Message d'état / erreur, lisible et rassurant */}
-      {message && (
-        <div
-          role="status"
-          className={`rounded-lg px-4 py-3 font-semibold text-center ${
-            message.type === "erreur"
-              ? "bg-red-100 text-red-800 border border-red-200"
-              : "bg-blue-50 text-blue-800 border border-blue-200"
-          }`}
+      <div className="flex flex-col gap-4 max-w-xl mx-auto w-full px-4 py-5 flex-1">
+        {/* CTA — dicter une facture */}
+        <Link
+          href="/facturer"
+          className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4 flex items-center gap-4 active:bg-slate-50"
         >
-          {message.texte}
-        </div>
-      )}
+          <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 text-2xl flex-shrink-0">
+            🎙️
+          </div>
+          <div>
+            <p className="font-bold text-slate-900 text-lg">Dicter une facture</p>
+            <p className="text-slate-400 text-sm">Parler, l'app s'occupe du reste</p>
+          </div>
+        </Link>
 
-      {/* Aperçu vivant et éditable */}
-      <ApercuFacture facture={facture} onChange={setFacture} />
-
-      {/* Génération du PDF */}
-      <button
-        type="button"
-        onClick={genererFichiers}
-        disabled={occupe}
-        className="px-4 py-5 rounded-xl bg-green-700 text-white font-bold text-xl shadow active:bg-green-800 disabled:opacity-40"
-      >
-        Générer le PDF
-      </button>
-
-      {/* Fichiers prêts : un bouton par fichier (fiable sur iPhone) */}
-      {fichiers.length > 0 && (
-        <div className="bg-white rounded-2xl border-2 border-green-300 p-4 flex flex-col gap-3">
-          <p className="font-bold text-lg">Fichiers prêts</p>
-          <p className="text-slate-600 text-sm">
-            {peutPartager
-              ? "Touche pour envoyer (mail, SMS) ou enregistrer le PDF."
-              : "Clique pour télécharger le PDF sur ton ordinateur."}
+        {/* Historique */}
+        {entries.length > 0 && (
+          <p className="text-xs font-bold text-slate-400 tracking-widest uppercase px-1 mt-1">
+            Récentes
           </p>
-          {fichiers.map((f) => {
-            const estPdf = f.nomFichier.toLowerCase().endsWith(".pdf");
-            const verbe = peutPartager ? "Partager" : "Télécharger";
-            return (
-              <button
-                key={f.nomFichier}
-                type="button"
-                onClick={() => partagerFichier(f.blob, f.nomFichier)}
-                className="flex items-center gap-3 px-4 py-4 rounded-xl border-2 border-green-400 text-green-800 font-bold text-lg active:bg-green-50"
-              >
-                <span className="text-2xl" aria-hidden="true">
-                  {estPdf ? "📄" : "📊"}
-                </span>
-                <span>{estPdf ? `${verbe} le PDF` : `${verbe} l’Excel`}</span>
-              </button>
-            );
-          })}
+        )}
+
+        {entries.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 mt-12 text-center">
+            <span className="text-5xl">📄</span>
+            <p className="font-semibold text-slate-600">
+              Aucune facture enregistrée
+            </p>
+            <p className="text-slate-400 text-sm">
+              Dicte ta première facture en appuyant sur la carte ci-dessus.
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {entries.map((entry) => {
+              const { ttc } = calculerTotaux(entry.facture);
+              const { numeroFacture, client, site } = entry.facture;
+              const siteCourt = abregerSite(site);
+              const ttcAffiche =
+                Number.isInteger(ttc)
+                  ? `${ttc} €`
+                  : `${ttc.toFixed(2).replace(".", ",")} €`;
+
+              return (
+                <li
+                  key={entry.id}
+                  className="bg-white rounded-2xl shadow-sm px-4 py-4 flex items-center gap-3"
+                >
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0" />
+
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-900 truncate">
+                      {client.nom || "Client"}
+                    </p>
+                    <p className="text-slate-400 text-sm truncate">
+                      Facture #{numeroFacture}
+                      {siteCourt ? ` (${siteCourt})` : ""}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <span className="font-bold text-slate-900">{ttcAffiche}</span>
+                    <button
+                      type="button"
+                      onClick={() => regenerer(entry)}
+                      disabled={enCours === entry.id}
+                      className="text-xs text-blue-600 font-semibold disabled:opacity-40"
+                    >
+                      {enCours === entry.id
+                        ? "…"
+                        : peutPartager
+                        ? "Partager"
+                        : "Télécharger"}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => supprimer(entry.id)}
+                    className="text-slate-300 active:text-red-400 text-xl px-1 flex-shrink-0"
+                    aria-label="Supprimer"
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {/* Bouton bas de page */}
+      <div className="sticky bottom-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pt-6 pb-8 px-4">
+        <div className="max-w-xl mx-auto">
+          <Link
+            href="/facturer"
+            className="block w-full py-4 rounded-2xl bg-blue-600 text-white font-extrabold text-center text-lg shadow-lg active:bg-blue-700"
+          >
+            + Nouvelle facture
+          </Link>
         </div>
-      )}
+      </div>
     </main>
   );
 }
