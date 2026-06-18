@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   loadHistorique,
   deleteHistoriqueEntry,
   loadReglages,
+  saveFacture,
   type HistoriqueEntry,
 } from "@/lib/storage";
 import { calculerTotaux } from "@/lib/calculs";
@@ -19,6 +21,7 @@ function abregerSite(site: string): string {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [entries, setEntries] = useState<HistoriqueEntry[]>([]);
   const [peutPartager, setPeutPartager] = useState(false);
   const [enCours, setEnCours] = useState<string | null>(null);
@@ -39,6 +42,11 @@ export default function Dashboard() {
   });
 
   const initiale = prenom ? prenom[0].toUpperCase() : "F";
+
+  function ouvrirFacture(entry: HistoriqueEntry) {
+    saveFacture(entry.facture);
+    router.push("/facturer");
+  }
 
   function supprimer(id: string) {
     const ok = window.confirm("Supprimer cette facture de l'historique ?");
@@ -131,44 +139,55 @@ export default function Dashboard() {
               return (
                 <li
                   key={entry.id}
-                  className="bg-white rounded-2xl shadow-sm px-4 py-4 flex items-center gap-3"
+                  className="bg-white rounded-2xl shadow-sm overflow-hidden"
                 >
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0" />
+                  {/* Zone principale — tap pour modifier */}
+                  <button
+                    type="button"
+                    onClick={() => ouvrirFacture(entry)}
+                    className="w-full px-4 py-4 flex items-center gap-3 active:bg-slate-50 text-left"
+                  >
+                    <div className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-slate-900 truncate">
+                        {client.nom || "Client"}
+                      </p>
+                      <p className="text-slate-400 text-sm truncate">
+                        Facture #{numeroFacture}
+                        {siteCourt ? ` (${siteCourt})` : ""}
+                      </p>
+                    </div>
+                    <span className="font-bold text-slate-900 flex-shrink-0">
+                      {ttcAffiche}
+                    </span>
+                  </button>
 
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-900 truncate">
-                      {client.nom || "Client"}
-                    </p>
-                    <p className="text-slate-400 text-sm truncate">
-                      Facture #{numeroFacture}
-                      {siteCourt ? ` (${siteCourt})` : ""}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <span className="font-bold text-slate-900">{ttcAffiche}</span>
+                  {/* Barre d'actions */}
+                  <div className="border-t border-slate-100 flex">
                     <button
                       type="button"
                       onClick={() => regenerer(entry)}
                       disabled={enCours === entry.id}
-                      className="text-xs text-blue-600 font-semibold disabled:opacity-40"
+                      className="flex-1 py-3 text-sm text-blue-600 font-semibold flex items-center justify-center gap-1.5 active:bg-blue-50 disabled:opacity-40"
                     >
-                      {enCours === entry.id
-                        ? "…"
-                        : peutPartager
-                        ? "Partager"
-                        : "Télécharger"}
+                      <span>📄</span>
+                      <span>
+                        {enCours === entry.id
+                          ? "Génération…"
+                          : peutPartager
+                          ? "Partager le PDF"
+                          : "Télécharger le PDF"}
+                      </span>
+                    </button>
+                    <div className="w-px bg-slate-100" />
+                    <button
+                      type="button"
+                      onClick={() => supprimer(entry.id)}
+                      className="px-5 py-3 text-sm text-red-400 font-semibold active:bg-red-50"
+                    >
+                      Supprimer
                     </button>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => supprimer(entry.id)}
-                    className="text-slate-300 active:text-red-400 text-xl px-1 flex-shrink-0"
-                    aria-label="Supprimer"
-                  >
-                    ×
-                  </button>
                 </li>
               );
             })}
