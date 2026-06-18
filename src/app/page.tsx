@@ -13,7 +13,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import BoutonMicro from "@/components/BoutonMicro";
 import ApercuFacture from "@/components/ApercuFacture";
-import ZoneCorrection from "@/components/ZoneCorrection";
 import type { Facture } from "@/lib/types";
 import { factureVide } from "@/lib/demo";
 import {
@@ -23,9 +22,9 @@ import {
   loadReglages,
   saveFacture,
   saveReglages,
+  saveHistoriqueEntry,
 } from "@/lib/storage";
 import { genererPDF } from "@/lib/pdf";
-import { genererExcel } from "@/lib/excel";
 import { partagerFichier, peutPartagerFichiers } from "@/lib/fichiers";
 
 type Message = { texte: string; type: "info" | "erreur" } | null;
@@ -184,22 +183,18 @@ export default function Page() {
     }
   }
 
-  /** Génère le PDF + l'Excel et les propose (partage natif iPhone ou téléchargement). */
+  /** Génère le PDF et le propose (partage natif iPhone ou téléchargement direct). */
   async function genererFichiers() {
     if (!facture) return;
     setOccupe(true);
     setFichiers([]);
-    info("Je prépare le PDF et l'Excel…");
+    info("Je prépare le PDF…");
     try {
-      const [pdf, excel] = await Promise.all([
-        genererPDF(facture),
-        genererExcel(facture),
-      ]);
-      // On ne partage pas tout de suite : on affiche deux boutons (un par fichier).
-      // Sur iPhone, partager fichier par fichier est bien plus fiable.
-      setFichiers([pdf, excel]);
+      const pdf = await genererPDF(facture);
+      setFichiers([pdf]);
 
-      // Une fois la facture émise, on prépare le numéro suivant dans les Réglages.
+      // Sauvegarde dans l'historique puis incrémentation du numéro.
+      saveHistoriqueEntry(facture);
       const reglages = loadReglages();
       reglages.prochainNumeroFacture = incrementerNumero(facture.numeroFacture);
       saveReglages(reglages);
@@ -230,6 +225,13 @@ export default function Page() {
           >
             Nouvelle facture
           </button>
+          <Link
+            href="/historique"
+            className="px-3 py-2 rounded-lg border-2 border-slate-300 font-bold"
+            aria-label="Historique"
+          >
+            📋
+          </Link>
           <Link
             href="/reglages"
             className="px-3 py-2 rounded-lg border-2 border-slate-300 font-bold"
@@ -262,12 +264,15 @@ export default function Page() {
       {/* Aperçu vivant et éditable */}
       <ApercuFacture facture={facture} onChange={setFacture} />
 
-      {/* Correction écrite + génération */}
-      <ZoneCorrection
-        onCorrection={appliquerTexte}
-        onGenerer={genererFichiers}
-        occupe={occupe}
-      />
+      {/* Génération du PDF */}
+      <button
+        type="button"
+        onClick={genererFichiers}
+        disabled={occupe}
+        className="px-4 py-5 rounded-xl bg-green-700 text-white font-bold text-xl shadow active:bg-green-800 disabled:opacity-40"
+      >
+        Générer le PDF
+      </button>
 
       {/* Fichiers prêts : un bouton par fichier (fiable sur iPhone) */}
       {fichiers.length > 0 && (
@@ -275,8 +280,8 @@ export default function Page() {
           <p className="font-bold text-lg">Fichiers prêts</p>
           <p className="text-slate-600 text-sm">
             {peutPartager
-              ? "Touche un fichier pour l’envoyer (mail, SMS) ou l’enregistrer."
-              : "Clique un fichier pour le télécharger sur ton ordinateur."}
+              ? "Touche pour envoyer (mail, SMS) ou enregistrer le PDF."
+              : "Clique pour télécharger le PDF sur ton ordinateur."}
           </p>
           {fichiers.map((f) => {
             const estPdf = f.nomFichier.toLowerCase().endsWith(".pdf");

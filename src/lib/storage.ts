@@ -103,6 +103,52 @@ export function clearFacture(): void {
   window.localStorage.removeItem(CLE_FACTURE);
 }
 
+// ----------------------------- Historique -----------------------------
+
+/** Une entrée de l'historique : la facture complète au moment de l'émission. */
+export type HistoriqueEntry = {
+  id: string;       // ISO datetime → clé unique
+  savedAt: string;  // même valeur, pour affichage
+  facture: Facture;
+};
+
+const CLE_HISTORIQUE = "fccs.historique";
+const HISTORIQUE_MAX = 50;
+
+/** Ajoute la facture courante à l'historique (50 entrées max, LIFO). */
+export function saveHistoriqueEntry(facture: Facture): void {
+  if (!navigateurDispo()) return;
+  try {
+    const existant = loadHistorique();
+    const now = new Date().toISOString();
+    const entry: HistoriqueEntry = { id: now, savedAt: now, facture };
+    const mis_a_jour = [entry, ...existant].slice(0, HISTORIQUE_MAX);
+    window.localStorage.setItem(CLE_HISTORIQUE, JSON.stringify(mis_a_jour));
+  } catch {
+    // localStorage plein : on ignore silencieusement
+  }
+}
+
+/** Charge l'historique complet (plus récent en premier). */
+export function loadHistorique(): HistoriqueEntry[] {
+  if (!navigateurDispo()) return [];
+  try {
+    const brut = window.localStorage.getItem(CLE_HISTORIQUE);
+    return brut ? (JSON.parse(brut) as HistoriqueEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Supprime une entrée de l'historique par son id. */
+export function deleteHistoriqueEntry(id: string): void {
+  if (!navigateurDispo()) return;
+  try {
+    const mis_a_jour = loadHistorique().filter((e) => e.id !== id);
+    window.localStorage.setItem(CLE_HISTORIQUE, JSON.stringify(mis_a_jour));
+  } catch {}
+}
+
 // ----------------------------- Numérotation -----------------------------
 
 /**

@@ -52,16 +52,18 @@ export async function partagerFichier(
   telecharger(blob, nomFichier);
 }
 
-/** Indique si l'appareil sait partager un fichier (iPhone, Safari Mac récent...). */
+/** Indique si l'appareil sait partager un fichier (iPhone, Android). */
 export function peutPartagerFichiers(): boolean {
   if (typeof navigator === "undefined") return false;
   const nav = navigator as Navigator & {
     canShare?: (data?: ShareData) => boolean;
   };
-  // Test avec un fichier fictif : certains navigateurs n'ont share() que pour du texte.
   try {
     const test = new File(["x"], "test.txt", { type: "text/plain" });
-    return !!nav.share && !!nav.canShare && nav.canShare({ files: [test] });
+    if (!nav.share || !nav.canShare || !nav.canShare({ files: [test] })) return false;
+    // Sur desktop (Windows, Linux, Mac Chrome), le menu de partage n'offre pas
+    // "Enregistrer dans les fichiers" — on force le téléchargement direct.
+    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   } catch {
     return false;
   }
