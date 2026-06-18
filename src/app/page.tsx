@@ -99,8 +99,11 @@ export default function Dashboard() {
           href="/facturer"
           className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4 flex items-center gap-4 active:bg-slate-50"
         >
-          <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 text-2xl flex-shrink-0">
-            🎙️
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="26" height="26" aria-hidden="true">
+              <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
+              <path d="M19 11a7 7 0 0 1-14 0H3a9 9 0 0 0 8 8.94V22h2v-2.06A9 9 0 0 0 21 11h-2z"/>
+            </svg>
           </div>
           <div>
             <p className="font-bold text-slate-900 text-lg">Dicter une facture</p>
